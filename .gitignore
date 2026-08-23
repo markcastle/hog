@@ -1,4 +1,4 @@
-# Build outputs
+# Build outputs (MSVC / MinGW)
 *.exe
 *.obj
 *.o
@@ -16,6 +16,9 @@
 *.idb
 *.pch
 *.res
+*.cod
+*.pgc
+*.pgd
 
 # MSVC / Visual Studio
 *.vcxproj.user
@@ -23,7 +26,14 @@
 *.user
 *.userosscache
 *.sln.docstates
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
 .vs/
+ipch/
 Debug/
 Release/
 x64/
@@ -31,9 +41,20 @@ x86/
 Win32/
 [Bb]in/
 [Oo]bj/
-ipch/
-*.VC.db
-*.VC.VC.opendb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+install_manifest.txt
+_deps/
+build/
+out/
+cmake-build-*/
 
 # MinGW / gcc leftovers
 *.d
@@ -41,6 +62,8 @@ ipch/
 
 # Editor / IDE
 .vscode/
+.idea/
+.cursor/
 *.code-workspace
 *~
 *.swp
