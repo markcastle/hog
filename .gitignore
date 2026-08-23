@@ -1,0 +1,59 @@
+# Build outputs
+*.exe
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.exp
+*.ilk
+*.pdb
+*.map
+*.iobj
+*.ipdb
+*.sbr
+*.bsc
+*.idb
+*.pch
+*.res
+
+# MSVC / Visual Studio
+*.vcxproj.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+Debug/
+Release/
+x64/
+x86/
+Win32/
+[Bb]in/
+[Oo]bj/
+ipch/
+*.VC.db
+*.VC.VC.opendb
+
+# MinGW / gcc leftovers
+*.d
+*.out
+
+# Editor / IDE
+.vscode/
+*.code-workspace
+*~
+*.swp
+*.swo
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# OS / misc
+.DS_Store
+*.log
+*.tmp
+*.temp
