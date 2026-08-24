@@ -1,32 +1,55 @@
 # hog
 
-A single-file Windows CLI tool that answers one question: **what is hammering this machine right now?**
+Your machine just turned into molasses. Task Manager is spinning up forever. You need an answer **now**.
 
-Task Manager is slow to open precisely when you need it, because it is a full WPF app that spins up COM, WMI and a UI thread on a box that is already choking. `hog` does none of that. It makes two calls into `ntdll`, sleeps for a fraction of a second, and prints a table. Cold start to first output is the sample interval plus a couple of milliseconds.
+**hog** is a tiny Windows CLI that answers one question: *what is hammering this box right now?*
 
-## Build
+No WPF. No COM. No WMI. Two calls into `ntdll`, a short nap, one table. Cold start to first output is basically just the sample interval.
 
+~45 KB. No installer. No admin. Windows 7+.
+
+---
+
+## ⚡ Quick start
+
+### 1. Build it
+
+Pick whichever compiler you already have:
+
+```bat
+:: MSVC (Developer Command Prompt)
+cl /O2 /MT src\hog.c
+
+:: MinGW
+x86_64-w64-mingw32-gcc -O2 -s -o hog.exe src/hog.c
 ```
-cl /O2 /MT src\hog.c                                :: MSVC
-x86_64-w64-mingw32-gcc -O2 -s -o hog.exe src/hog.c  # MinGW
+
+Drop `hog.exe` somewhere on your `PATH`. Done.
+
+### 2. Run it when things feel wrong
+
+```bat
+hog
 ```
 
-No SDK beyond the standard headers, no dependencies, no installer. The result is around 45 KB. Drop it in a folder on your `PATH` and forget about it.
+You get the top 10 processes by a combined "who is the villain?" score. That's usually enough.
 
-Works on Windows 7 and later, x86 or x64. Admin is not required.
+### 3. Dig a little when you need to
 
-## Usage
-
+```bat
+hog -w              :: live view (htop-style), Ctrl+C to quit
+hog -d -n 20        :: top 20 by disk throughput
+hog -i 1000         :: sample a full second instead of 400ms
+hog -c              :: sort by CPU
+hog -f              :: sort by hard page faults
+hog -m              :: sort by private memory
 ```
-hog                 top 10 by combined impact score
-hog -w              watch mode, re-samples until Ctrl+C
-hog -d -n 20        top 20 by disk throughput
-hog -i 1000         sample over a full second instead of 400ms
-```
 
-Sort flags: `-c` CPU, `-d` disk, `-f` hard page faults, `-m` private memory.
+Incident tip: `hog -n 50 > snapshot.txt` while the pain is happening. Look later. Don't panic-kill from a guess.
 
-## Reading the output
+---
+
+## 👀 What you're looking at
 
 ```
 sampled 0.40s over 16 logical CPUs   cpu 62.3%   dpc 1.1%   isr 0.4%
@@ -36,40 +59,108 @@ sampled 0.40s over 16 logical CPUs   cpu 62.3%   dpc 1.1%   isr 0.4%
    4012    2.1      58.70      1420          0      95.2    12  MsMpEng.exe
 ```
 
-The header line is the part Task Manager will not show you. `dpc` and `isr` are kernel time spent in driver interrupt handling, which belongs to no process at all. If that number is high, no amount of staring at the process list will help you, because the culprit is a driver. The tool says so explicitly when it crosses 8%.
+### The header (the part Task Manager hides from you)
 
-Columns are all **rates measured across the sample window**, not lifetime totals, with the single exception of `PRIV MB`. That distinction matters: a process with a huge lifetime CPU total might be completely idle at this instant.
+| Field | Plain English |
+| --- | --- |
+| `cpu` | Whole-machine CPU busy during the sample |
+| `dpc` / `isr` | Kernel time stuck in driver interrupt work — **belongs to no process** |
 
-`HARDFLT/s` is the one people overlook. Hard page faults are reads from the pagefile, and a machine that feels dead while showing modest CPU is usually hard faulting itself into the ground.
+If `dpc`/`isr` climbs past ~8%, hog tells you outright. Staring harder at the process list won't help. Suspect a driver.
 
-## How it works
+### The columns
 
-Everything comes from one `NtQuerySystemInformation(SystemProcessInformation)` call, which returns a linked chunk of records covering every process on the system: CPU times, I/O transfer counts, fault counts, memory. This is the important design decision. The obvious alternative, `EnumProcesses` plus `OpenProcess` plus `GetProcessTimes` per PID, needs a handle to every process, which is slow, fails on protected processes, and does exactly the kind of per-process work you want to avoid when the box is already struggling.
+Almost everything is a **rate over the sample window**, not a lifetime total. `PRIV MB` is the exception (current private memory).
 
-Two snapshots are taken and matched on `(pid, createTime)` rather than PID alone, because PIDs get recycled and you do not want a dead process's counters attributed to its replacement.
+That matters: a process with a huge lifetime CPU number can be completely idle *right now*.
 
-The struct definitions are not in the public SDK. They have been layout-stable since Windows 7 and the offsets are asserted in the source comments, but this is the one part of the tool that could theoretically break on a future Windows release. If it ever does, it will produce obvious nonsense rather than crash.
+| Column | What it means |
+| --- | --- |
+| `CPU%` | Share of the machine's CPU this process ate during the sample |
+| `DISK MB/s` | Disk bytes read+written, as MB/s |
+| `IO/s` | Disk I/O operations per second |
+| `HARDFLT/s` | Hard page faults/sec (reads from the pagefile) |
+| `PRIV MB` | Private memory right now |
+| `THR` | Thread count |
+| `NAME` | Process image name |
 
-The process sets itself to `HIGH_PRIORITY_CLASS` on startup, so it still gets scheduled promptly while something else is saturating the CPU.
+`HARDFLT/s` is the one people overlook. Modest CPU + a machine that feels dead? Often it's thrashing the pagefile.
 
-## The impact score
+---
 
-The default sort uses a blunt heuristic that exists to float the likely culprit to row one, not to be scientifically defensible:
+## 🧠 How it works
 
+```mermaid
+flowchart LR
+  A[Snapshot A<br/>all processes] --> B[Sleep<br/>default 400ms]
+  B --> C[Snapshot B<br/>all processes]
+  C --> D[Match on<br/>pid + createTime]
+  D --> E[Diff counters<br/>CPU · disk · faults]
+  E --> F[Score & sort]
+  F --> G[Print table]
 ```
-score = cpuPct + min(150, diskMBps * 2) + min(150, hardFaults / 10)
+
+One `NtQuerySystemInformation(SystemProcessInformation)` call returns every process: CPU times, I/O counts, faults, memory. No `OpenProcess` per PID, so protected processes don't break the run, and a dying machine doesn't get poked to death.
+
+Processes are matched on `(pid, createTime)`, not PID alone — Windows recycles PIDs, and you don't want a dead process's counters blamed on whoever got the number next.
+
+hog bumps itself to `HIGH_PRIORITY_CLASS` so it still gets scheduled while something else is saturating the CPU.
+
+> The ntdll structs aren't in the public SDK. They've been layout-stable since Windows 7. If a future Windows release ever breaks them, you'll get obvious nonsense rather than a crash.
+
+---
+
+## 🎯 The impact score
+
+Default sort is a blunt heuristic. Job one: float the likely culprit to row one. Not peer-reviewed science.
+
+```text
+score = cpuPct
+      + min(150, diskMBps * 2)
+      + min(150, hardFaults / 10)
 ```
 
-Roughly: 50 MB/s sustained disk, or 1000 hard faults a second, each counts about as much as pegging a full CPU core's worth of the machine. If your normal baseline is different, the divisors are a two-line edit in `impact_score()`.
+Roughly: **50 MB/s sustained disk**, or **~1000 hard faults/sec**, each counts about as much as pegging a full core's worth of the machine.
 
-## Things it deliberately does not do
+Hate the weights? They're a two-line edit in `impact_score()`.
 
-- **Kill processes.** Look, then decide, then use `taskkill`. A tool that both diagnoses and kills is a tool you eventually use in a hurry and regret.
-- **Show a UI.** Pipe it. `hog -n 50 > snapshot.txt` during an incident is the whole point.
-- **Cover network I/O.** That needs a different information class and a lot more code. Disk and CPU cover the overwhelming majority of real "why is this slow" cases.
+---
 
-## Obvious extensions
+## ⌨️ Flags (cheat sheet)
 
-- Log mode: append a CSV row every N seconds so you can catch the thing that only happens at 3am.
-- Add `SystemFileCacheInformation` and commit charge to spot memory pressure at the machine level, not just per process.
-- A `-t` flag that drills into per-thread times for a single PID via `SystemProcessInformation`'s thread array, which is already sitting in the buffer and currently ignored.
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `-n TOP` | `10` | How many rows to print |
+| `-i MS` | `400` | Sample interval (minimum 50) |
+| `-w` | off | Live in-place refresh (htop-style) until Ctrl+C |
+| `-c` | — | Sort by CPU |
+| `-d` | — | Sort by disk throughput |
+| `-f` | — | Sort by hard page faults |
+| `-m` | — | Sort by private memory |
+
+No sort flag → combined impact score.
+
+---
+
+## 🚫 What hog will not do
+
+- **Kill processes.** Look, then decide, then `taskkill`. A tool that diagnoses *and* kills is a tool you eventually regret at 2am.
+- **Show a UI.** Pipe it. Snapshot it. Stay light.
+- **Cover network I/O.** Different APIs, more code. Disk + CPU catch most real "why is this slow?" cases.
+
+---
+
+## ✅ Requirements
+
+- Windows 7 or later (x86 or x64)
+- No admin required
+- No dependencies beyond the normal Windows headers
+- Binary lands around **45 KB**
+
+---
+
+## 🧩 Ideas on the shelf
+
+- Log mode: append a CSV row every N seconds for the 3am ghost
+- Machine-level memory pressure (commit charge / file cache), not just per-process
+- `-t PID` thread drill-down (the thread array is already in the buffer; hog currently ignores it)

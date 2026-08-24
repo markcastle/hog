@@ -6,8 +6,8 @@
  * hard page faults. No process handles are opened, no WMI, no COM, no UI.
  * Cold start to first output is the sample interval plus a couple of ms.
  *
- * Build (MSVC):  cl /O2 /MT hog.c
- * Build (MinGW): x86_64-w64-mingw32-gcc -O2 -s -o hog.exe hog.c
+ * Build (MSVC):  cl /O2 /MT src\hog.c
+ * Build (MinGW): x86_64-w64-mingw32-gcc -O2 -s -o hog.exe src/hog.c
  *
  * Runs on Windows 7 and later, x86 or x64, no admin required.
  */
@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 /* ------------------------------------------------------------------ */
 /* ntdll bits. These structures are not in the public SDK headers but  */
@@ -269,6 +270,8 @@ static int find_prev(const SNAP *prev, DWORD pid, ULONGLONG created, size_t hint
     return -1;
 }
 
+static void emit_line(const char *fmt, ...);
+
 static void report(const SNAP *a, const SNAP *b, int topN, double freq, int nproc)
 {
     double secs = (double)(b->qpc - a->qpc) / freq;
@@ -314,17 +317,18 @@ static void report(const SNAP *a, const SNAP *b, int topN, double freq, int npro
     double dpc  = 100.0 * (double)(b->dpc100ns  - a->dpc100ns)  / machine100ns;
     double isr  = 100.0 * (double)(b->intr100ns - a->intr100ns) / machine100ns;
 
-    printf("sampled %.2fs over %d logical CPUs   cpu %.1f%%   dpc %.1f%%   isr %.1f%%\n",
+    emit_line("sampled %.2fs over %d logical CPUs   cpu %.1f%%   dpc %.1f%%   isr %.1f%%",
            secs, nproc, busy, dpc, isr);
     if (dpc + isr > 8.0)
-        printf("  note: high kernel DPC/ISR time. Suspect a driver, not a process.\n");
-    printf("\n%7s %6s %10s %9s %10s %9s %5s  %s\n",
+        emit_line("  note: high kernel DPC/ISR time. Suspect a driver, not a process.");
+    emit_line("");
+    emit_line("%7s %6s %10s %9s %10s %9s %5s  %s",
            "PID", "CPU%", "DISK MB/s", "IO/s", "HARDFLT/s", "PRIV MB", "THR", "NAME");
 
     int shown = 0;
     for (size_t i = 0; i < nr && shown < topN; i++, shown++) {
         ROW *r = &rows[i];
-        printf("%7lu %6.1f %10.2f %9.0f %10.0f %9.1f %5lu  %s\n",
+        emit_line("%7lu %6.1f %10.2f %9.0f %10.0f %9.1f %5lu  %s",
                (unsigned long)r->pid, r->cpuPct, r->diskMBps, r->iops,
                r->faultsPerSec, r->privMB, (unsigned long)r->threads, r->name);
     }
@@ -332,6 +336,91 @@ static void report(const SNAP *a, const SNAP *b, int topN, double freq, int npro
 }
 
 static void free_snap(SNAP *s) { free(s->v); s->v = NULL; s->n = 0; }
+/* Watch mode: redraw in place like htop, instead of scrolling forever. */
+static volatile LONG g_running = 1;
+static int g_live = 0;
+static HANDLE g_out = INVALID_HANDLE_VALUE;
+static CONSOLE_CURSOR_INFO g_cursor_saved;
+static int g_cursor_saved_ok = 0;
+
+static BOOL WINAPI on_ctrl(DWORD type)
+{
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) {
+        InterlockedExchange(&g_running, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void clear_eol(void)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    DWORD written, n;
+    if (!GetConsoleScreenBufferInfo(g_out, &info)) return;
+    n = (DWORD)(info.dwSize.X - info.dwCursorPosition.X);
+    if (n) FillConsoleOutputCharacterA(g_out, ' ', n, info.dwCursorPosition, &written);
+}
+
+/* Reason: erase leftover rows when the table shrinks (e.g. note line gone). */
+static void clear_eos(void)
+{
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    DWORD written, n;
+    if (!GetConsoleScreenBufferInfo(g_out, &info)) return;
+    n = (DWORD)info.dwSize.X * (DWORD)(info.dwSize.Y - info.dwCursorPosition.Y)
+        - (DWORD)info.dwCursorPosition.X;
+    if (!n) return;
+    FillConsoleOutputCharacterA(g_out, ' ', n, info.dwCursorPosition, &written);
+    FillConsoleOutputAttribute(g_out, info.wAttributes, n, info.dwCursorPosition, &written);
+}
+
+static void emit_line(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    if (g_live) {
+        fflush(stdout);   /* Reason: CRT cursor must match before Win32 clear_eol. */
+        clear_eol();
+    }
+    putchar('\n');
+}
+
+static void watch_begin(void)
+{
+    DWORD mode;
+    g_out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (g_out == INVALID_HANDLE_VALUE || !GetConsoleMode(g_out, &mode)) { g_live = 0; return; }
+    g_live = 1;
+    if (GetConsoleCursorInfo(g_out, &g_cursor_saved)) {
+        CONSOLE_CURSOR_INFO hidden = g_cursor_saved;
+        hidden.bVisible = FALSE;
+        SetConsoleCursorInfo(g_out, &hidden);
+        g_cursor_saved_ok = 1;
+    }
+    SetConsoleCtrlHandler(on_ctrl, TRUE);
+}
+
+static void watch_end(void)
+{
+    if (g_live && g_cursor_saved_ok) SetConsoleCursorInfo(g_out, &g_cursor_saved);
+    if (g_live) { clear_eol(); putchar('\n'); fflush(stdout); }
+    g_live = 0;
+}
+
+static void watch_frame_begin(void)
+{
+    COORD home = { 0, 0 };
+    if (g_live) SetConsoleCursorPosition(g_out, home);
+}
+
+static void watch_frame_end(void)
+{
+    if (!g_live) return;
+    fflush(stdout);
+    clear_eos();
+}
 
 static void usage(void)
 {
@@ -340,7 +429,7 @@ static void usage(void)
       "  hog [-n TOP] [-i MS] [-w] [-c|-d|-f|-m]\n\n"
       "  -n TOP   rows to print (default 10)\n"
       "  -i MS    sample interval in ms (default 400, minimum 50)\n"
-      "  -w       watch: keep sampling until Ctrl+C\n"
+      "  -w       watch: live in-place refresh until Ctrl+C\n"
       "  -c       sort by CPU\n"
       "  -d       sort by disk throughput\n"
       "  -f       sort by hard page faults\n"
@@ -370,8 +459,6 @@ int main(int argc, char **argv)
     if (!NtQSI) { fprintf(stderr, "hog: cannot reach NtQuerySystemInformation\n"); return 1; }
 
     SetConsoleOutputCP(CP_UTF8);
-
-    /* Stay responsive even while the box is being hammered. */
     SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 
     LARGE_INTEGER f;
@@ -383,22 +470,31 @@ int main(int argc, char **argv)
     int nproc = (int)si.dwNumberOfProcessors;
     if (nproc < 1) nproc = 1;
 
+    if (watch) watch_begin();
+
     SNAP a, b;
     memset(&a, 0, sizeof a);
     memset(&b, 0, sizeof b);
 
-    if (!take_snapshot(&a)) { fprintf(stderr, "hog: snapshot failed\n"); return 1; }
+    if (!take_snapshot(&a)) { fprintf(stderr, "hog: snapshot failed\n"); watch_end(); return 1; }
 
     do {
         Sleep((DWORD)interval);
-        if (!take_snapshot(&b)) { fprintf(stderr, "hog: snapshot failed\n"); return 1; }
+        if (!g_running) break;
+        if (!take_snapshot(&b)) { fprintf(stderr, "hog: snapshot failed\n"); watch_end(); return 1; }
+        if (watch) watch_frame_begin();
         report(&a, &b, topN, freq, nproc);
-        if (watch) printf("\n");
+        if (watch) {
+            emit_line("");
+            emit_line("  watch - Ctrl+C to quit");
+            watch_frame_end();
+        }
         free_snap(&a);
         a = b;
         memset(&b, 0, sizeof b);
-    } while (watch);
+    } while (watch && g_running);
 
     free_snap(&a);
+    watch_end();
     return 0;
 }
