@@ -9,3 +9,4 @@
 - [x] Fix watch mode to redraw in place like htop (2026-08-23)
 - [x] GitHub Actions: MinGW cross-compile on push, GitHub Release with hog.exe / hog-x86.exe on `v*` tags (2026-11-05)
 - [x] Add `HOG_VERSION` and `-v` flag; README points at latest-release download (2026-11-05)
+- [x] Add install.ps1 one-liner installer and Install section at top of README (2026-11-05)

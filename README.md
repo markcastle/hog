@@ -6,7 +6,19 @@ Your machine just turned into molasses. Task Manager is spinning up forever. You
 
 No WPF. No COM. No WMI. Two calls into `ntdll`, a short nap, one table. Cold start to first output is basically just the sample interval.
 
-~45 KB. No installer. No admin. Windows 7+.
+~45 KB. No admin. Windows 7+.
+
+## 📦 Install
+
+Paste this into PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/markcastle/hog/master/install.ps1 | iex
+```
+
+That downloads the latest `hog.exe` to `%LOCALAPPDATA%\hog` and adds it to your user PATH. Run it again to upgrade. No admin prompt, nothing touched system-wide.
+
+Prefer to do it by hand? Grab `hog.exe` from the [latest release](https://github.com/markcastle/hog/releases/latest) and drop it anywhere on your PATH.
 
 ---
 
@@ -14,20 +26,7 @@ No WPF. No COM. No WMI. Two calls into `ntdll`, a short nap, one table. Cold sta
 
 ### 1. Get it
 
-**One click:** grab `hog.exe` from the [latest release](https://github.com/markcastle/hog/releases/latest).
-
-**One line (PowerShell or cmd):**
-
-```powershell
-curl.exe -LO https://github.com/markcastle/hog/releases/latest/download/hog.exe
-```
-
-That's the x64 build. On 32-bit Windows use `hog-x86.exe` instead. Checksums are in `SHA256SUMS.txt` next to the binaries.
-
-Drop `hog.exe` somewhere on your `PATH`. Done.
-
-<details>
-<summary>Or build it yourself</summary>
+See [Install](#-install) above. One line, done. Or build it yourself:
 
 ```bat
 :: MSVC (Developer Command Prompt)
@@ -36,8 +35,6 @@ cl /O2 /MT src\hog.c
 :: MinGW
 x86_64-w64-mingw32-gcc -O2 -s -o hog.exe src/hog.c
 ```
-
-</details>
 
 ### 2. Run it when things feel wrong
 
