@@ -12,6 +12,10 @@
  * Runs on Windows 7 and later, x86 or x64, no admin required.
  */
 
+#ifndef HOG_VERSION
+#define HOG_VERSION "0.1.0-dev"
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -425,8 +429,8 @@ static void watch_frame_end(void)
 static void usage(void)
 {
     printf(
-      "hog - what is slowing this machine down, right now\n\n"
-      "  hog [-n TOP] [-i MS] [-w] [-c|-d|-f|-m]\n\n"
+      "hog " HOG_VERSION " - what is slowing this machine down, right now\n\n"
+      "  hog [-n TOP] [-i MS] [-w] [-c|-d|-f|-m] [-v]\n\n"
       "  -n TOP   rows to print (default 10)\n"
       "  -i MS    sample interval in ms (default 400, minimum 50)\n"
       "  -w       watch: live in-place refresh until Ctrl+C\n"
@@ -434,6 +438,7 @@ static void usage(void)
       "  -d       sort by disk throughput\n"
       "  -f       sort by hard page faults\n"
       "  -m       sort by private memory\n"
+      "  -v       print version and exit\n"
       "           default sorts by a combined impact score\n");
 }
 
@@ -449,6 +454,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-d")) g_sort = SORT_DISK;
         else if (!strcmp(argv[i], "-f")) g_sort = SORT_FAULT;
         else if (!strcmp(argv[i], "-m")) g_sort = SORT_MEM;
+        else if (!strcmp(argv[i], "-v")) { printf("hog %s\n", HOG_VERSION); return 0; }
         else { usage(); return 0; }
     }
     if (topN < 1) topN = 1;

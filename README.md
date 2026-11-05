@@ -12,9 +12,22 @@ No WPF. No COM. No WMI. Two calls into `ntdll`, a short nap, one table. Cold sta
 
 ## ⚡ Quick start
 
-### 1. Build it
+### 1. Get it
 
-Pick whichever compiler you already have:
+**One click:** grab `hog.exe` from the [latest release](https://github.com/markcastle/hog/releases/latest).
+
+**One line (PowerShell or cmd):**
+
+```powershell
+curl.exe -LO https://github.com/markcastle/hog/releases/latest/download/hog.exe
+```
+
+That's the x64 build. On 32-bit Windows use `hog-x86.exe` instead. Checksums are in `SHA256SUMS.txt` next to the binaries.
+
+Drop `hog.exe` somewhere on your `PATH`. Done.
+
+<details>
+<summary>Or build it yourself</summary>
 
 ```bat
 :: MSVC (Developer Command Prompt)
@@ -24,7 +37,7 @@ cl /O2 /MT src\hog.c
 x86_64-w64-mingw32-gcc -O2 -s -o hog.exe src/hog.c
 ```
 
-Drop `hog.exe` somewhere on your `PATH`. Done.
+</details>
 
 ### 2. Run it when things feel wrong
 
